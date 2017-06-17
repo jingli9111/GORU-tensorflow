@@ -6,4 +6,4 @@ If you find this work useful, please cite [arXiv:1706.02761](https://arxiv.org/p
 
 ## Installation
 
-requires TensorFlow 1.2.0# GORU-tensorflow
+requires TensorFlow 1.2.0
