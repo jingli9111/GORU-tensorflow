@@ -29,7 +29,7 @@ def noise_data(T, n_data, n_sequence):
 
 	return x, y
 
-def main(model, T, n_iter, n_batch, n_hidden, capacity, FFT):
+def main(model, T, n_iter, n_batch, n_hidden, capacity, fft):
 
 	# --- Set data params ----------------
 	n_input = 11
@@ -60,11 +60,15 @@ def main(model, T, n_iter, n_batch, n_hidden, capacity, FFT):
 	elif model == "GRU":
 		cell = tf.nn.rnn_cell.GRUCell(n_hidden)
 		hidden_out, _ = tf.nn.dynamic_rnn(cell, input_data, dtype=tf.float32)
-	elif model == "EURNN":
-		cell = EURNNCell(n_hidden, capacity, FFT, False)
-		hidden_out, _ = tf.nn.dynamic_rnn(cell, input_data, dtype=tf.float32)
+	elif model == "EUNN":
+		cell = EUNNCell(n_hidden, capacity, fft, comp)
+		if comp:
+			hidden_out_comp, _ = tf.nn.dynamic_rnn(cell, input_data, dtype=tf.complex64)
+			hidden_out = tf.real(hidden_out_comp)
+		else:
+			hidden_out, _ = tf.nn.dynamic_rnn(cell, input_data, dtype=tf.float32)
 	elif model == "GORU":
-		cell = GORUCell(n_hidden, capacity, FFT)
+		cell = GORUCell(n_hidden, capacity, fft)
 		hidden_out, _ = tf.nn.dynamic_rnn(cell, input_data, dtype=tf.float32)
 
 	# --- Hidden Layer to Output ----------------------
@@ -127,13 +131,14 @@ def main(model, T, n_iter, n_batch, n_hidden, capacity, FFT):
 if __name__=="__main__":
 	parser = argparse.ArgumentParser(
 		description="Denoise Task")
-	parser.add_argument("model", default='LSTM', help='Model name: LSTM, EURNN, GRU, GORU')
+	parser.add_argument("model", default='LSTM', help='Model name: LSTM, EUNN, GRU, GORU')
 	parser.add_argument('-T', type=int, default=200, help='Information sequence length')
-	parser.add_argument('--n_iter', '-I', type=int, default=10000, help='training iteration number')
+	parser.add_argument('--n_iter', '-I', type=int, default=5000, help='training iteration number')
 	parser.add_argument('--n_batch', '-B', type=int, default=128, help='batch size')
 	parser.add_argument('--n_hidden', '-H', type=int, default=128, help='hidden layer size')
-	parser.add_argument('--capacity', '-L', type=int, default=2, help='Tunable style capacity, only for EURNN, default value is 2')
-	parser.add_argument('--FFT', '-F', type=str, default="False", help='FFT style, default is False')
+	parser.add_argument('--capacity', '-L', type=int, default=2, help='Tunable style capacity, default value is 2')
+	parser.add_argument('--comp', '-C', type=str, default="False", help='Complex domain or Real domain, only for EUNN. Default is False: complex domain')
+	parser.add_argument('--fft', '-F', type=str, default="False", help='fft style, only for EUNN and GORU, default is False: tunable style')
 
 	args = parser.parse_args()
 	dict = vars(args)
@@ -151,7 +156,7 @@ if __name__=="__main__":
 			  	'n_batch': dict['n_batch'],
 			  	'n_hidden': dict['n_hidden'],
 			  	'capacity': dict['capacity'],
-			  	'FFT': dict['FFT'],
+			  	'fft': dict['fft'],
 			}
 
 	main(**kwargs)
