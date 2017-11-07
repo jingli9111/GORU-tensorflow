@@ -146,7 +146,7 @@ if __name__=="__main__":
     parser.add_argument('--n_hidden', '-H', type=int, default=128, help='hidden layer size')
     parser.add_argument('--capacity', '-L', type=int, default=2, help='Tunable style capacity, default value is 2')
     parser.add_argument('--comp', '-C', type=str, default="False", help='Complex domain or Real domain, only for EUNN. Default is False: complex domain')
-    parser.add_argument('--fft', '-F', type=str, default="False", help='fft style, only for EUNN and GORU, default is False: tunable style')
+    parser.add_argument('--fft', '-F', type=str, default="True", help='fft style, only for EUNN and GORU, default is False: tunable style')
 
     args = parser.parse_args()
     dict = vars(args)
