@@ -139,7 +139,7 @@ if __name__=="__main__":
 
     parser = argparse.ArgumentParser(
         description="Copying Memory Task")
-    parser.add_argument("model", default='LSTM', help='Model name: LSTM, GRU, EUNN, GORU')
+    parser.add_argument("model", default='GORU', help='Model name: LSTM, GRU, EUNN, GORU')
     parser.add_argument('-T', type=int, default=100, help='Copying Problem delay')
     parser.add_argument('--n_iter', '-I', type=int, default=5000, help='training iteration number')
     parser.add_argument('--n_batch', '-B', type=int, default=128, help='batch size')
