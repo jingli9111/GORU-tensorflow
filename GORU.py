@@ -312,7 +312,7 @@ class GORUCell(RNNCell):
 
 			U_init = init_ops.random_uniform_initializer(-0.01, 0.01)
 			b_init = init_ops.constant_initializer(2.)
-			mod_b_init = init_ops.constant_initializer(-0.01)
+			mod_b_init = init_ops.constant_initializer(0.01)
 			
 			U = vs.get_variable("U", [inputs.get_shape()[-1], self._hidden_size * 3], dtype=tf.float32, initializer = U_init)
 			Ux = math_ops.matmul(inputs, U)
