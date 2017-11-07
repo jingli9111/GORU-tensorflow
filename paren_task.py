@@ -124,7 +124,7 @@ def main(model, T, n_iter, n_batch, n_hidden, capacity, fft):
 
 		test_acc = sess.run(accuracy, feed_dict={x: test_x, y: test_y})
 		test_loss = sess.run(cost, feed_dict={x: test_x, y: test_y})
-		prints("Test result: Loss= " + "{:.6f}".format(test_loss) + \
+		print("Test result: Loss= " + "{:.6f}".format(test_loss) + \
 					", Accuracy= " + "{:.5f}".format(test_acc))
 
 
