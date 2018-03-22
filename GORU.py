@@ -5,21 +5,16 @@ import numpy as np
 from tensorflow.python.ops import variable_scope as vs
 from tensorflow.python.ops.rnn_cell_impl import RNNCell
 
-def modrelu(z, b, comp):
-    if comp:
-        z_norm = tf.sqrt(tf.square(tf.real(z)) + tf.square(tf.imag(z))) + 0.00001
-        step1 = z_norm + b
-        step2 = tf.complex(tf.nn.relu(step1), tf.zeros_like(z_norm))
-        step3 = z/tf.complex(z_norm, tf.zeros_like(z_norm))
-    else:
-        z_norm = tf.abs(z) + 0.00001
-        step1 = z_norm + b
-        step2 = tf.nn.relu(step1)
-        step3 = tf.sign(z)
+def modrelu(z, b):
+
+    z_norm = tf.abs(z) + 0.00001
+    step1 = z_norm + b
+    step2 = tf.nn.relu(step1)
+    step3 = tf.sign(z)
        
     return tf.multiply(step3, step2)
 
-def _eunn_param(hidden_size, capacity=2, fft=False, comp=True):
+def _eunn_param(hidden_size, capacity=2, fft=False):
     """
     Create parameters and do the initial preparations
     """
@@ -40,43 +35,25 @@ def _eunn_param(hidden_size, capacity=2, fft=False, comp=True):
         cos_theta = tf.cos(params_theta)
         sin_theta = tf.sin(params_theta)
 
-        if comp:
-            params_phi = vs.get_variable("phi_0", [varsize], initializer=theta_phi_initializer)
-            cos_phi = tf.cos(params_phi)
-            sin_phi = tf.sin(params_phi)
-
-            cos_list_0 = tf.complex(cos_theta, tf.zeros_like(cos_theta))
-            cos_list_1 = tf.complex(tf.multiply(cos_theta, cos_phi), tf.multiply(cos_theta, sin_phi))
-            sin_list_0 = tf.complex(sin_theta, tf.zeros_like(sin_theta))
-            sin_list_1 = tf.complex(-tf.multiply(sin_theta, cos_phi), -tf.multiply(sin_theta, sin_phi))
-
+        
         last = 0
         for i in range(capacity):
             size = capacity - i
             normal_size = (hidden_size // (2 ** size)) * (2 ** (size - 1))
             extra_size = max(0, (hidden_size % (2 ** size)) - (2 ** (size - 1)))
 
-            if comp:
-                cos_list_normal = tf.concat([tf.slice(cos_list_0, [last], [normal_size]), tf.slice(cos_list_1, [last], [normal_size])], 0)
-                sin_list_normal = tf.concat([tf.slice(sin_list_0, [last], [normal_size]), -tf.slice(sin_list_1, [last], [normal_size])], 0)
-                last += normal_size
+           
+            cos_list_normal = tf.slice(cos_theta, [last], [normal_size])
+            cos_list_normal = tf.concat([cos_list_normal, cos_list_normal], 0)
+            cos_list_extra = tf.slice(cos_theta, [last+normal_size], [extra_size])
+            cos_list_extra = tf.concat([cos_list_extra, tf.ones([hidden_size - 2*normal_size - 2*extra_size]), cos_list_extra], 0)
 
-                cos_list_extra = tf.concat([tf.slice(cos_list_0, [last], [extra_size]), tf.complex(tf.ones([hidden_size - 2*normal_size - 2*extra_size]), tf.zeros([hidden_size - 2*normal_size - 2*extra_size])), tf.slice(cos_list_1, [last], [extra_size])], 0)
-                sin_list_extra = tf.concat([tf.slice(sin_list_0, [last], [extra_size]), tf.complex(tf.zeros([hidden_size - 2*normal_size - 2*extra_size]), tf.zeros([hidden_size - 2*normal_size - 2*extra_size])), -tf.slice(sin_list_1, [last], [extra_size])], 0)
-                last += extra_size
+            sin_list_normal = tf.slice(sin_theta, [last], [normal_size])
+            sin_list_normal = tf.concat([sin_list_normal, -sin_list_normal], 0)
+            sin_list_extra = tf.slice(sin_theta, [last+normal_size], [extra_size])
+            sin_list_extra = tf.concat([sin_list_extra, tf.zeros([hidden_size - 2*normal_size - 2*extra_size]), -sin_list_extra], 0)
 
-            else:
-                cos_list_normal = tf.slice(cos_theta, [last], [normal_size])
-                cos_list_normal = tf.concat([cos_list_normal, cos_list_normal], 0)
-                cos_list_extra = tf.slice(cos_theta, [last+normal_size], [extra_size])
-                cos_list_extra = tf.concat([cos_list_extra, tf.ones([hidden_size - 2*normal_size - 2*extra_size]), cos_list_extra], 0)
-
-                sin_list_normal = tf.slice(sin_theta, [last], [normal_size])
-                sin_list_normal = tf.concat([sin_list_normal, -sin_list_normal], 0)
-                sin_list_extra = tf.slice(sin_theta, [last+normal_size], [extra_size])
-                sin_list_extra = tf.concat([sin_list_extra, tf.zeros([hidden_size - 2*normal_size - 2*extra_size]), -sin_list_extra], 0)
-
-                last += normal_size + extra_size
+            last += normal_size + extra_size
 
             if normal_size != 0:
                 cos_list_normal = tf.reshape(tf.transpose(tf.reshape(cos_list_normal, [-1, 2*normal_size//(2**size)])), [-1])
@@ -105,68 +82,25 @@ def _eunn_param(hidden_size, capacity=2, fft=False, comp=True):
         cos_theta_1 = tf.reshape(tf.cos(params_theta_1), [capacity_b, -1, 1])
         sin_theta_1 = tf.reshape(tf.sin(params_theta_1), [capacity_b, -1, 1])
 
-        if comp:
-            params_phi_0 = vs.get_variable("phi_0", [capacity_a, hidden_size_a], initializer=theta_phi_initializer)
-            cos_phi_0 = tf.reshape(tf.cos(params_phi_0), [capacity_a, -1, 1])
-            sin_phi_0 = tf.reshape(tf.sin(params_phi_0), [capacity_a, -1, 1])
+        
+        cos_list_0 = tf.reshape(tf.concat([cos_theta_0, cos_theta_0], 2), [capacity_a, -1])
+        sin_list_0 = tf.reshape(tf.concat([sin_theta_0, -sin_theta_0], 2), [capacity_a, -1])
+        if hidden_size_a*2 != hidden_size:
+            cos_list_0 = tf.concat([cos_list_0, tf.ones([capacity_a, 1])], 1)
+            sin_list_0 = tf.concat([sin_list_0, tf.zeros([capacity_a, 1])], 1)
 
-            cos_list_0_re = tf.reshape(tf.concat([cos_theta_0, tf.multiply(cos_theta_0, cos_phi_0)], 2), [capacity_a, -1])
-            cos_list_0_im = tf.reshape(tf.concat([tf.zeros_like(cos_theta_0), tf.multiply(cos_theta_0, sin_phi_0)], 2), [capacity_a, -1])
-            if hidden_size_a*2 != hidden_size:
-                cos_list_0_re = tf.concat([cos_list_0_re, tf.ones([capacity_a, 1])], 1)
-                cos_list_0_im = tf.concat([cos_list_0_im, tf.zeros([capacity_a, 1])], 1)
-            cos_list_0 = tf.complex(cos_list_0_re, cos_list_0_im)
-
-            sin_list_0_re = tf.reshape(tf.concat([sin_theta_0, - tf.multiply(sin_theta_0, cos_phi_0)], 2), [capacity_a, -1])
-            sin_list_0_im = tf.reshape(tf.concat([tf.zeros_like(sin_theta_0), - tf.multiply(sin_theta_0, sin_phi_0)], 2), [capacity_a, -1])
-            if hidden_size_a*2 != hidden_size:
-                sin_list_0_re = tf.concat([sin_list_0_re, tf.zeros([capacity_a, 1])], 1)
-                sin_list_0_im = tf.concat([sin_list_0_im, tf.zeros([capacity_a, 1])], 1)
-            sin_list_0 = tf.complex(sin_list_0_re, sin_list_0_im)
-
-            params_phi_1 = vs.get_variable("phi_1", [capacity_b, hidden_size_b], initializer=theta_phi_initializer)
-            cos_phi_1 = tf.reshape(tf.cos(params_phi_1), [capacity_b, -1, 1])
-            sin_phi_1 = tf.reshape(tf.sin(params_phi_1), [capacity_b, -1, 1])
-
-            cos_list_1_re = tf.reshape(tf.concat([cos_theta_1, tf.multiply(cos_theta_1, cos_phi_1)], 2), [capacity_b, -1])
-            cos_list_1_re = tf.concat([tf.ones((capacity_b, 1)), cos_list_1_re], 1)
-            cos_list_1_im = tf.reshape(tf.concat([tf.zeros_like(cos_theta_1), tf.multiply(cos_theta_1, sin_phi_1)], 2), [capacity_b, -1])
-            cos_list_1_im = tf.concat([tf.zeros((capacity_b, 1)), cos_list_1_im], 1)
-            if hidden_size_b*2 != hidden_size-1:
-                cos_list_1_re = tf.concat([cos_list_1_re, tf.ones([capacity_b, 1])], 1)
-                cos_list_1_im = tf.concat([cos_list_1_im, tf.zeros([capacity_b, 1])], 1)
-            cos_list_1 = tf.complex(cos_list_1_re, cos_list_1_im)
-
-            sin_list_1_re = tf.reshape(tf.concat([sin_theta_1, -tf.multiply(sin_theta_1, cos_phi_1)], 2), [capacity_b, -1])
-            sin_list_1_re = tf.concat([tf.zeros((capacity_b, 1)), sin_list_1_re], 1)
-            sin_list_1_im = tf.reshape(tf.concat([tf.zeros_like(sin_theta_1), -tf.multiply(sin_theta_1, sin_phi_1)], 2), [capacity_b, -1])
-            sin_list_1_im = tf.concat([tf.zeros((capacity_b, 1)), sin_list_1_im], 1)
-            if hidden_size_b*2 != hidden_size-1:
-                sin_list_1_re = tf.concat([sin_list_1_re, tf.zeros([capacity_b, 1])], 1)
-                sin_list_1_im = tf.concat([sin_list_1_im, tf.zeros([capacity_b, 1])], 1)
-            sin_list_1 = tf.complex(sin_list_1_re, sin_list_1_im)
-        else:
-            cos_list_0 = tf.reshape(tf.concat([cos_theta_0, cos_theta_0], 2), [capacity_a, -1])
-            sin_list_0 = tf.reshape(tf.concat([sin_theta_0, -sin_theta_0], 2), [capacity_a, -1])
-            if hidden_size_a*2 != hidden_size:
-                cos_list_0 = tf.concat([cos_list_0, tf.ones([capacity_a, 1])], 1)
-                sin_list_0 = tf.concat([sin_list_0, tf.zeros([capacity_a, 1])], 1)
-
-            cos_list_1 = tf.reshape(tf.concat([cos_theta_1, cos_theta_1], 2), [capacity_b, -1])
-            cos_list_1 = tf.concat([tf.ones((capacity_b, 1)), cos_list_1], 1)
-            sin_list_1 = tf.reshape(tf.concat([sin_theta_1, -sin_theta_1], 2), [capacity_b, -1])
-            sin_list_1 = tf.concat([tf.zeros((capacity_b, 1)), sin_list_1], 1)
-            if hidden_size_b*2 != hidden_size-1:
-                cos_list_1 = tf.concat([cos_list_1, tf.zeros([capacity_b, 1])], 1)
-                sin_list_1 = tf.concat([sin_list_1, tf.zeros([capacity_b, 1])], 1)
+        cos_list_1 = tf.reshape(tf.concat([cos_theta_1, cos_theta_1], 2), [capacity_b, -1])
+        cos_list_1 = tf.concat([tf.ones((capacity_b, 1)), cos_list_1], 1)
+        sin_list_1 = tf.reshape(tf.concat([sin_theta_1, -sin_theta_1], 2), [capacity_b, -1])
+        sin_list_1 = tf.concat([tf.zeros((capacity_b, 1)), sin_list_1], 1)
+        if hidden_size_b*2 != hidden_size-1:
+            cos_list_1 = tf.concat([cos_list_1, tf.zeros([capacity_b, 1])], 1)
+            sin_list_1 = tf.concat([sin_list_1, tf.zeros([capacity_b, 1])], 1)
 
         if capacity_b != capacity_a:
-            if comp:
-                cos_list_1 = tf.concat([cos_list_1, tf.complex(tf.zeros([1, hidden_size]), tf.zeros([1, hidden_size]))], 0)
-                sin_list_1 = tf.concat([sin_list_1, tf.complex(tf.zeros([1, hidden_size]), tf.zeros([1, hidden_size]))], 0)
-            else:
-                cos_list_1 = tf.concat([cos_list_1, tf.zeros([1, hidden_size])], 0)
-                sin_list_1 = tf.concat([sin_list_1, tf.zeros([1, hidden_size])], 0)
+
+            cos_list_1 = tf.concat([cos_list_1, tf.zeros([1, hidden_size])], 0)
+            sin_list_1 = tf.concat([sin_list_1, tf.zeros([1, hidden_size])], 0)
 
         diag_vec = tf.reshape(tf.concat([cos_list_0, cos_list_1], 1), [capacity_a*2, hidden_size])
         off_vec = tf.reshape(tf.concat([sin_list_0, sin_list_1], 1), [capacity_a*2, hidden_size])
@@ -185,11 +119,8 @@ def _eunn_param(hidden_size, capacity=2, fft=False, comp=True):
 
     diag_vec = _toTensorArray(diag_vec)
     off_vec = _toTensorArray(off_vec)
-    if comp:
-        omega = vs.get_variable("omega", [hidden_size], initializer=theta_phi_initializer)
-        diag = tf.complex(tf.cos(omega), tf.sin(omega))
-    else:
-        diag = None
+
+    diag = None
 
     return diag_vec, off_vec, diag, capacity
 
@@ -290,14 +221,14 @@ class GORUCell(RNNCell):
 
 	"""
 
-	def __init__(self, hidden_size, capacity=2, fft=False, activation=modrelu):
+	def __init__(self, hidden_size, capacity=2, fft=True, activation=modrelu):
 		super(GORUCell, self).__init__()
 		self._hidden_size = hidden_size
 		self._activation = activation
 		self._capacity = capacity
 		self._fft = fft
 
-		self.diag_vec, self.off_vec, self.diag, self._capacity = _eunn_param(hidden_size, capacity, fft, False)
+		self.diag_vec, self.off_vec, self.diag, self._capacity = _eunn_param(hidden_size, capacity, fft)
 
 
 
@@ -337,11 +268,10 @@ class GORUCell(RNNCell):
 			r_tmp = U_rx + W_rh + bias_r
 			g_tmp = U_gx + W_gh + bias_g
 			r = tf.sigmoid(r_tmp)
-
 			g = tf.sigmoid(g_tmp)
 
 			Unitaryh = _eunn_loop(state, self._capacity, self.diag_vec, self.off_vec, self.diag, self._fft)
-			c = modrelu(tf.multiply(r, Unitaryh) + U_cx, bias_c, False)
+			c = modrelu(tf.multiply(r, Unitaryh) + U_cx, bias_c)
 			new_state = tf.multiply(g, state) +  tf.multiply(1 - g, c)
 
 		return new_state, new_state

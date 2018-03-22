@@ -10,7 +10,7 @@ requires TensorFlow 1.2.0
 
 ## Usage
 
-To use GORU in your model, simply copy [GORU.py](https://github.com/jingli9111/EUNN-tensorflow/blob/master/GORU.py).
+To use GORU in your model, simply copy [GORU.py](https://github.com/jingli9111/GORU-tensorflow/blob/master/GORU.py).
 
 Then you can use GORU in the same way you use built-in LSTM:
 ```
@@ -31,3 +31,12 @@ Two tasks for RNN in the paper are shown here. Use `-h` for more information
 python copying_task.py --model GORU
 ```
 
+#### Denoise Task
+```
+python denoise_task.py --model GORU
+```
+
+#### Parenthesis Task
+```
+python paren_task.py --model GORU
+```
