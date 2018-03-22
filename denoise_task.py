@@ -29,7 +29,7 @@ def noise_data(T, n_data, n_sequence):
 
 	return x, y
 
-def main(model, T, n_iter, n_batch, n_hidden, capacity, fft):
+def main(model, T, n_iter, n_batch, n_hidden, capacity, complex, fft):
 
 	# --- Set data params ----------------
 	n_input = 11
@@ -61,8 +61,8 @@ def main(model, T, n_iter, n_batch, n_hidden, capacity, fft):
 		cell = tf.nn.rnn_cell.GRUCell(n_hidden)
 		hidden_out, _ = tf.nn.dynamic_rnn(cell, input_data, dtype=tf.float32)
 	elif model == "EUNN":
-		cell = EUNNCell(n_hidden, capacity, fft, comp)
-		if comp:
+		cell = EUNNCell(n_hidden, capacity, fft, complex)
+		if complex:
 			hidden_out_comp, _ = tf.nn.dynamic_rnn(cell, input_data, dtype=tf.complex64)
 			hidden_out = tf.real(hidden_out_comp)
 		else:
@@ -131,32 +131,33 @@ def main(model, T, n_iter, n_batch, n_hidden, capacity, fft):
 if __name__=="__main__":
 	parser = argparse.ArgumentParser(
 		description="Denoise Task")
-	parser.add_argument("model", default='GORU', help='Model name: LSTM, EUNN, GRU, GORU')
-	parser.add_argument('-T', type=int, default=200, help='Information sequence length')
+	parser.add_argument("--model", default='GORU', help='Model name: LSTM, EUNN, GRU, GORU')
+	parser.add_argument('--T', '-T', type=int, default=200, help='Information sequence length')
 	parser.add_argument('--n_iter', '-I', type=int, default=5000, help='training iteration number')
 	parser.add_argument('--n_batch', '-B', type=int, default=128, help='batch size')
 	parser.add_argument('--n_hidden', '-H', type=int, default=128, help='hidden layer size')
 	parser.add_argument('--capacity', '-L', type=int, default=2, help='Tunable style capacity, default value is 2')
-	parser.add_argument('--comp', '-C', type=str, default="False", help='Complex domain or Real domain, only for EUNN. Default is False: complex domain')
-	parser.add_argument('--fft', '-F', type=str, default="True", help='fft style, only for EUNN and GORU, default is False: tunable style')
+	parser.add_argument('--complex', '-C', type=str, default="True", help='Complex domain or Real domain for EUNN. Default is True: complex domain')
+	parser.add_argument('--fft', '-F', type=str, default="True", help='fft style, only for GORU, default is True')
 
 	args = parser.parse_args()
 	dict = vars(args)
-
+	
 	for i in dict:
 		if (dict[i]=="False"):
 			dict[i] = False
 		elif dict[i]=="True":
 			dict[i] = True
 		
-	kwargs = {	
+	kwargs = {	  
 				'model': dict['model'],
 				'T': dict['T'],
 				'n_iter': dict['n_iter'],
-			  	'n_batch': dict['n_batch'],
-			  	'n_hidden': dict['n_hidden'],
-			  	'capacity': dict['capacity'],
-			  	'fft': dict['fft'],
+				'n_batch': dict['n_batch'],
+				'n_hidden': dict['n_hidden'],
+				'capacity': dict['capacity'],
+				'complex': dict['complex'],
+				'fft': dict['fft'],
 			}
 
 	main(**kwargs)

@@ -24,7 +24,7 @@ Args:
 
 
 ## Example tasks for GORU
-Two tasks for RNN in the paper are shown here. Use `-h` for more information
+Three tasks for RNN in the paper are shown here. Use `-h` for more information
 
 #### Copying Memory Task
 ```
