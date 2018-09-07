@@ -1,278 +1,274 @@
-"""Module implementing GORU Cell.
-"""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import tensorflow as tf
+import math
 import numpy as np
-from tensorflow.python.ops import variable_scope as vs
-from tensorflow.python.ops.rnn_cell_impl import RNNCell
+from tensorflow.python.ops import rnn_cell_impl
 
-def modrelu(z, b):
 
-    z_norm = tf.abs(z) + 0.00001
-    step1 = z_norm + b
-    step2 = tf.nn.relu(step1)
-    step3 = tf.sign(z)
+def modrelu(inputs, bias):
+    """
+    modReLU activation function
+    """
+
+    norm = tf.abs(inputs) + 0.00001
+    biased_norm = norm + bias
+    magnitude = tf.nn.relu(biased_norm)
+    phase = tf.sign(inputs)
        
-    return tf.multiply(step3, step2)
+    return phase * magnitude
 
-def _eunn_param(hidden_size, capacity=2, fft=False):
+def generate_index_tunable(s, L):
     """
-    Create parameters and do the initial preparations
+    generate the index lists for eunn to prepare weight matrices 
+    and perform efficient rotations
+    This function works for tunable case
+    """    
+    ind1 = list(range(s))
+    ind2 = list(range(s))
+
+    for i in range(s):
+        if i%2 == 1:
+            ind1[i] = ind1[i] - 1
+            if i == s -1:
+                continue
+            else:
+                ind2[i] = ind2[i] + 1
+        else:
+            ind1[i] = ind1[i] + 1
+            if i == 0: 
+                continue
+            else:
+                ind2[i] = ind2[i] - 1
+
+    ind_exe = [ind1, ind2] * int(L/2)
+
+    ind3 = []
+    ind4 = []
+
+    for i in range(int(s/2)):
+        ind3.append(i)
+        ind3.append(i + int(s/2))
+
+    ind4.append(0)
+    for i in range(int(s/2) - 1):
+        ind4.append(i + 1)
+        ind4.append(i + int(s/2))
+    ind4.append(s - 1)
+
+    ind_param = [ind3, ind4]
+
+    return ind_exe, ind_param
+
+
+def generate_index_fft(s):
     """
-    theta_phi_initializer = tf.random_uniform_initializer(-np.pi, np.pi)
-    if fft:
-        capacity = int(np.ceil(np.log2(hidden_size)))
+    generate the index lists for eunn to prepare weight matrices 
+    and perform efficient rotations
+    This function works for fft case
+    """      
+    def ind_s(k):
+        if k==0:
+            return np.array([[1,0]])
+        else:
+            temp = np.array(range(2**k))
+            list0 = [np.append(temp + 2**k, temp)]
+            list1 = ind_s(k-1)
+            for i in range(k):
+                list0.append(np.append(list1[i],list1[i] + 2**k))
+            return list0
 
-        diag_list_0 = []
-        off_list_0 = []
-        varsize = 0
-        for i in range(capacity):
-            size = capacity - i
-            normal_size = (hidden_size // (2 ** size)) * (2 ** (size - 1))
-            extra_size = max(0, (hidden_size % (2 ** size)) - (2 ** (size - 1)))
-            varsize += normal_size + extra_size
+    t = ind_s(int(math.log(s/2, 2)))
 
-        params_theta = vs.get_variable("theta_0", [varsize], initializer=theta_phi_initializer)
-        cos_theta = tf.cos(params_theta)
-        sin_theta = tf.sin(params_theta)
+    ind_exe = []
+    for i in range(int(math.log(s, 2))):
+        ind_exe.append(tf.constant(t[i]))
+
+    ind_param = []
+    for i in range(int(math.log(s, 2))):
+        ind = np.array([])
+        for j in range(2**i):
+            ind = np.append(ind, np.array(range(0, s, 2**i)) + j).astype(np.int32)
+
+        ind_param.append(tf.constant(ind))
+    
+    return ind_exe, ind_param
+
+
+def fft_param(num_units):
+    
+    phase_init = tf.random_uniform_initializer(-3.14, 3.14)
+    capacity = int(math.log(num_units, 2))
+
+    theta = tf.get_variable("theta", [capacity, num_units//2], 
+        initializer=phase_init)
+    cos_theta = tf.cos(theta)
+    sin_theta = tf.sin(theta)
+        
+    cos_list = tf.concat([cos_theta, cos_theta], axis=1)
+    sin_list = tf.concat([sin_theta, -sin_theta], axis=1)
 
         
-        last = 0
-        for i in range(capacity):
-            size = capacity - i
-            normal_size = (hidden_size // (2 ** size)) * (2 ** (size - 1))
-            extra_size = max(0, (hidden_size % (2 ** size)) - (2 ** (size - 1)))
+    ind_exe, index_fft = generate_index_fft(num_units)
 
-           
-            cos_list_normal = tf.slice(cos_theta, [last], [normal_size])
-            cos_list_normal = tf.concat([cos_list_normal, cos_list_normal], 0)
-            cos_list_extra = tf.slice(cos_theta, [last+normal_size], [extra_size])
-            cos_list_extra = tf.concat([cos_list_extra, tf.ones([hidden_size - 2*normal_size - 2*extra_size]), cos_list_extra], 0)
+    v1 = tf.stack([tf.gather(cos_list[i,:], index_fft[i]) for i in range(capacity)])
+    v2 = tf.stack([tf.gather(sin_list[i,:], index_fft[i]) for i in range(capacity)])
 
-            sin_list_normal = tf.slice(sin_theta, [last], [normal_size])
-            sin_list_normal = tf.concat([sin_list_normal, -sin_list_normal], 0)
-            sin_list_extra = tf.slice(sin_theta, [last+normal_size], [extra_size])
-            sin_list_extra = tf.concat([sin_list_extra, tf.zeros([hidden_size - 2*normal_size - 2*extra_size]), -sin_list_extra], 0)
 
-            last += normal_size + extra_size
+    return v1, v2, ind_exe
 
-            if normal_size != 0:
-                cos_list_normal = tf.reshape(tf.transpose(tf.reshape(cos_list_normal, [-1, 2*normal_size//(2**size)])), [-1])
-                sin_list_normal = tf.reshape(tf.transpose(tf.reshape(sin_list_normal, [-1, 2*normal_size//(2**size)])), [-1])
+def tunable_param(num_units, capacity):
 
-            cos_list = tf.concat([cos_list_normal, cos_list_extra], 0)
-            sin_list = tf.concat([sin_list_normal, sin_list_extra], 0)
-            diag_list_0.append(cos_list)
-            off_list_0.append(sin_list)
+    capacity_A = int(capacity//2)
+    capacity_B = capacity - capacity_A
+    phase_init = tf.random_uniform_initializer(-3.14, 3.14)
 
-        diag_vec = tf.stack(diag_list_0, 0)
-        off_vec = tf.stack(off_list_0, 0)
+    theta_A = tf.get_variable("theta_A", [capacity_A, num_units//2], 
+        initializer=phase_init)
+    cos_theta_A = tf.cos(theta_A)
+    sin_theta_A = tf.sin(theta_A)
 
-    else:
-        capacity_b = capacity//2
-        capacity_a = capacity - capacity_b
+    cos_list_A = tf.concat([cos_theta_A, cos_theta_A], axis=1)
+    sin_list_A = tf.concat([sin_theta_A, -sin_theta_A], axis=1)         
 
-        hidden_size_a = hidden_size//2
-        hidden_size_b = (hidden_size-1)//2
 
-        params_theta_0 = vs.get_variable("theta_0", [capacity_a, hidden_size_a], initializer=theta_phi_initializer)
-        cos_theta_0 = tf.reshape(tf.cos(params_theta_0), [capacity_a, -1, 1])
-        sin_theta_0 = tf.reshape(tf.sin(params_theta_0), [capacity_a, -1, 1])
+    theta_B = tf.get_variable("theta_B", [capacity_B, num_units//2 - 1], 
+        initializer=phase_init)
+    cos_theta_B = tf.cos(theta_B)
+    sin_theta_B = tf.sin(theta_B)
 
-        params_theta_1 = vs.get_variable("theta_1", [capacity_b, hidden_size_b], initializer=theta_phi_initializer)
-        cos_theta_1 = tf.reshape(tf.cos(params_theta_1), [capacity_b, -1, 1])
-        sin_theta_1 = tf.reshape(tf.sin(params_theta_1), [capacity_b, -1, 1])
+    cos_list_B = tf.concat([tf.ones([capacity_B, 1]), cos_theta_B, 
+        cos_theta_B, tf.ones([capacity_B, 1])], axis=1)
+    sin_list_B = tf.concat([tf.zeros([capacity_B, 1]), sin_theta_B, 
+        - sin_theta_B, tf.zeros([capacity_B, 1])], axis=1)
 
+
+    ind_exe, [index_A, index_B] = generate_index_tunable(num_units, capacity)
+ 
+
+    diag_list_A = tf.gather(cos_list_A, index_A, axis=1)
+    off_list_A = tf.gather(sin_list_A, index_A, axis=1)
+    diag_list_B = tf.gather(cos_list_B, index_B, axis=1)
+    off_list_B = tf.gather(sin_list_B, index_B, axis=1)
+
+
+    v1 = tf.reshape(tf.concat([diag_list_A, diag_list_B], axis=1), [capacity, num_units])
+    v2 = tf.reshape(tf.concat([off_list_A, off_list_B], axis=1), [capacity, num_units])
+
+
+    return v1, v2, ind_exe
+
+
+class GORUCell(rnn_cell_impl.RNNCell):
+    """Efficient Unitary Network Cell
+    
+    The implementation is based on: 
+
+    http://arxiv.org/abs/1612.05231.
+
+    """
+
+    def __init__(self, 
+                num_units, 
+                capacity=2, 
+                fft=True, 
+                activation=modrelu,
+                reuse=None):
+        """Initializes the EUNN  cell.
+        Args:
+          num_units: int, The number of units in the LSTM cell.
+          capacity: int, The capacity of the unitary matrix for tunable
+            case.
+          fft: bool, default false, whether to use fft style 
+          architecture or tunable style.
+        """
+
+
+
+        super(GORUCell, self).__init__(_reuse=reuse)
+        self._num_units = num_units
+        self._activation = activation
+        self._capacity = capacity
+        self._fft = fft
+
+        if self._capacity > self._num_units:
+            raise ValueError("Do not set capacity larger than hidden size, it is redundant")
+
+        if self._fft:
+            if math.log(self._num_units, 2) % 1 != 0: 
+                raise ValueError("FFT style only supports power of 2 of hidden size")
+        else:
+            if self._num_units % 2 != 0:
+                raise ValueError("Tunable style only supports even number of hidden size")
+
+            if self._capacity % 2 != 0:
+                raise ValueError("Tunable style only supports even number of capacity")
+
+
+
+        if self._fft:
+            self._capacity = int(math.log(self._num_units, 2))
+            self._v1, self._v2, self._ind = fft_param(self._num_units)
+        else:
+            self._v1, self._v2, self._ind = tunable_param(self._num_units, self._capacity)
+
+
+    @property
+    def state_size(self):
+        return self._num_units
+
+    @property
+    def output_size(self):
+        return self._num_units
+
+
+    def loop(self, h):
+        for i in range(self._capacity):
+            diag = h * self._v1[i,:]
+            off = h * self._v2[i,:]
+            h = diag + tf.gather(off, self._ind[i], axis=1)
+
+        return h
+
+
+    def __call__(self, inputs, state, scope=None):
+        with tf.variable_scope(scope or "goru_cell"):
+
+            inputs_size = inputs.get_shape()[-1]
+
+            input_matrix_init = tf.random_uniform_initializer(-0.01, 0.01)
+            bias_init = tf.constant_initializer(2.)
+            mod_bias_init = tf.constant_initializer(0.01)
+            
+            U = tf.get_variable("U", [inputs_size, self._num_units * 3], dtype=tf.float32, initializer = input_matrix_init)
+            Ux = tf.matmul(inputs, U)
+            U_cx, U_rx, U_gx = tf.split(Ux, 3, axis=1)
+
+            W_r = tf.get_variable("W_r", [self._num_units, self._num_units], dtype=tf.float32, initializer = input_matrix_init)
+            W_g = tf.get_variable("W_g", [self._num_units, self._num_units], dtype=tf.float32, initializer = input_matrix_init)
+            W_rh = tf.matmul(state, W_r)
+            W_gh = tf.matmul(state, W_g)
+
+            bias_r = tf.get_variable("bias_r", [self._num_units], dtype=tf.float32, initializer = bias_init)
+            bias_g = tf.get_variable("bias_g", [self._num_units], dtype=tf.float32)
+            bias_c = tf.get_variable("bias_c", [self._num_units], dtype=tf.float32, initializer = mod_bias_init)
         
-        cos_list_0 = tf.reshape(tf.concat([cos_theta_0, cos_theta_0], 2), [capacity_a, -1])
-        sin_list_0 = tf.reshape(tf.concat([sin_theta_0, -sin_theta_0], 2), [capacity_a, -1])
-        if hidden_size_a*2 != hidden_size:
-            cos_list_0 = tf.concat([cos_list_0, tf.ones([capacity_a, 1])], 1)
-            sin_list_0 = tf.concat([sin_list_0, tf.zeros([capacity_a, 1])], 1)
 
-        cos_list_1 = tf.reshape(tf.concat([cos_theta_1, cos_theta_1], 2), [capacity_b, -1])
-        cos_list_1 = tf.concat([tf.ones((capacity_b, 1)), cos_list_1], 1)
-        sin_list_1 = tf.reshape(tf.concat([sin_theta_1, -sin_theta_1], 2), [capacity_b, -1])
-        sin_list_1 = tf.concat([tf.zeros((capacity_b, 1)), sin_list_1], 1)
-        if hidden_size_b*2 != hidden_size-1:
-            cos_list_1 = tf.concat([cos_list_1, tf.zeros([capacity_b, 1])], 1)
-            sin_list_1 = tf.concat([sin_list_1, tf.zeros([capacity_b, 1])], 1)
+            r_tmp = U_rx + W_rh + bias_r
+            g_tmp = U_gx + W_gh + bias_g
+            r = tf.sigmoid(r_tmp)
+            g = tf.sigmoid(g_tmp)
 
-        if capacity_b != capacity_a:
+            Unitaryh = self.loop(state)
+            c = self._activation(r * Unitaryh + U_cx, bias_c)
+            new_state = tf.multiply(g, state) +  tf.multiply(1 - g, c)
 
-            cos_list_1 = tf.concat([cos_list_1, tf.zeros([1, hidden_size])], 0)
-            sin_list_1 = tf.concat([sin_list_1, tf.zeros([1, hidden_size])], 0)
-
-        diag_vec = tf.reshape(tf.concat([cos_list_0, cos_list_1], 1), [capacity_a*2, hidden_size])
-        off_vec = tf.reshape(tf.concat([sin_list_0, sin_list_1], 1), [capacity_a*2, hidden_size])
-
-        if capacity_b != capacity_a:
-            diag_vec = tf.slice(diag_vec, [0, 0], [capacity, hidden_size])
-            off_vec = tf.slice(off_vec, [0, 0], [capacity, hidden_size])
-
-    def _toTensorArray(elems):
-
-        elems = tf.convert_to_tensor(elems)
-        n = tf.shape(elems)[0]
-        elems_ta = tf.TensorArray(dtype=elems.dtype, size=n, dynamic_size=False, infer_shape=True, clear_after_read=False)
-        elems_ta = elems_ta.unstack(elems)
-        return elems_ta
-
-    diag_vec = _toTensorArray(diag_vec)
-    off_vec = _toTensorArray(off_vec)
-
-    diag = None
-
-    return diag_vec, off_vec, diag, capacity
-
-
-def _eunn_loop(state, capacity, diag_vec_list, off_vec_list, diag, fft):
-    """
-    EUNN main loop, applying unitary matrix on input tensor
-    """
-    i = 0
-    def layer_tunable(x, i):
-
-        diag_vec = diag_vec_list.read(i)
-        off_vec = off_vec_list.read(i)
-
-        diag = tf.multiply(x, diag_vec)
-        off = tf.multiply(x, off_vec)
-
-        def even_input(off, size):
-
-            def even_s(off, size):
-                off = tf.reshape(off, [-1, size//2, 2])
-                off = tf.reshape(tf.reverse(off, [2]), [-1, size])
-                return off
-
-            def odd_s(off, size):
-                off, helper = tf.split(off, [size-1, 1], 1)
-                size -= 1
-                off = even_s(off, size)
-                off = tf.concat([off, helper], 1)
-                return off
-
-            off = tf.cond(tf.equal(tf.mod(size, 2), 0), lambda: even_s(off, size), lambda: odd_s(off, size))
-            return off
-
-        def odd_input(off, size):
-            helper, off = tf.split(off, [1, size-1], 1)
-            size -= 1
-            off = even_input(off, size)
-            off = tf.concat([helper, off], 1)
-            return off
-
-        size = int(off.get_shape()[1])
-        off = tf.cond(tf.equal(tf.mod(i, 2), 0), lambda: even_input(off, size), lambda: odd_input(off, size))
-
-        layer_output = diag + off
-        i += 1
-
-        return layer_output, i
-
-    def layer_fft(state, i):
-
-        diag_vec = diag_vec_list.read(i)
-        off_vec = off_vec_list.read(i)
-        diag = tf.multiply(state, diag_vec)
-        off = tf.multiply(state, off_vec)
-
-        hidden_size = int(off.get_shape()[1])
-        # size = 2**i
-        dist = capacity - i
-        normal_size = (hidden_size // (2**dist)) * (2**(dist-1))
-        normal_size *= 2
-        extra_size = tf.maximum(0, (hidden_size % (2**dist)) - (2**(dist-1)))
-        hidden_size -= normal_size
-
-        def modify(off_normal, dist, normal_size):
-            off_normal = tf.reshape(tf.reverse(tf.reshape(off_normal, [-1, normal_size//(2**dist), 2, (2**(dist-1))]), [2]), [-1, normal_size])
-            return off_normal
-
-        def do_nothing(off_normal):
-            return off_normal
-
-        off_normal, off_extra = tf.split(off, [normal_size, hidden_size], 1)
-        off_normal = tf.cond(tf.equal(normal_size, 0), lambda: do_nothing(off_normal), lambda: modify(off_normal, dist, normal_size))
-        helper1, helper2 = tf.split(off_extra, [hidden_size-extra_size, extra_size], 1)
-        off_extra = tf.concat([helper2, helper1], 1)
-        off = tf.concat([off_normal, off_extra], 1)
-
-        layer_output = diag + off
-        i += 1
-
-        return layer_output, i
-
-    if fft:
-        layer_function = layer_fft
-    else:
-        layer_function = layer_tunable
-    output, _ = tf.while_loop(lambda state, i: tf.less(i, capacity), layer_function, [state, i])
-
-    if not diag is None:
-        output = tf.multiply(output, diag)
-
-
-    return output
-
-class GORUCell(RNNCell):
-	"""Gated Orthogonal Recurrent Unit Cell
-	The implementation is based on: http://arxiv.org/abs/1706.02761.
-
-	"""
-
-	def __init__(self, hidden_size, capacity=2, fft=True, activation=modrelu):
-		super(GORUCell, self).__init__()
-		self._hidden_size = hidden_size
-		self._activation = activation
-		self._capacity = capacity
-		self._fft = fft
-
-		self.diag_vec, self.off_vec, self.diag, self._capacity = _eunn_param(hidden_size, capacity, fft)
+        return new_state, new_state
 
 
 
-	@property
-	def state_size(self):
-		return self._hidden_size
 
-	@property
-	def output_size(self):
-		return self._hidden_size
 
-	@property
-	def capacity(self):
-		return self._capacity
-
-	def __call__(self, inputs, state, scope=None):
-		with vs.variable_scope(scope or "goru_cell"):
-
-			U_init = tf.random_uniform_initializer(-0.01, 0.01)
-			b_init = tf.constant_initializer(2.)
-			mod_b_init = tf.constant_initializer(0.01)
-			
-			U = vs.get_variable("U", [inputs.get_shape()[-1], self._hidden_size * 3], dtype=tf.float32, initializer = U_init)
-			Ux = tf.matmul(inputs, U)
-			U_cx, U_rx, U_gx = tf.split(Ux, 3, axis=1)
-
-			W_r = vs.get_variable("W_r", [self._hidden_size, self._hidden_size], dtype=tf.float32, initializer = U_init)
-			W_g = vs.get_variable("W_g", [self._hidden_size, self._hidden_size], dtype=tf.float32, initializer = U_init)
-			W_rh = tf.matmul(state, W_r)
-			W_gh = tf.matmul(state, W_g)
-
-			bias_r = vs.get_variable("bias_r", [self._hidden_size], dtype=tf.float32, initializer = b_init)
-			bias_g = vs.get_variable("bias_g", [self._hidden_size], dtype=tf.float32)
-			bias_c = vs.get_variable("bias_c", [self._hidden_size], dtype=tf.float32, initializer = mod_b_init)
-		
-
-			r_tmp = U_rx + W_rh + bias_r
-			g_tmp = U_gx + W_gh + bias_g
-			r = tf.sigmoid(r_tmp)
-			g = tf.sigmoid(g_tmp)
-
-			Unitaryh = _eunn_loop(state, self._capacity, self.diag_vec, self.off_vec, self.diag, self._fft)
-			c = modrelu(tf.multiply(r, Unitaryh) + U_cx, bias_c)
-			new_state = tf.multiply(g, state) +  tf.multiply(1 - g, c)
-
-		return new_state, new_state
 
