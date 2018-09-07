@@ -166,7 +166,7 @@ class GORUCell(rnn_cell_impl.RNNCell):
     
     The implementation is based on: 
 
-    http://arxiv.org/abs/1705.02761.
+    http://arxiv.org/abs/1706.02761.
 
     """
 
