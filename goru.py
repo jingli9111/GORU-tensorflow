@@ -22,7 +22,7 @@ def modrelu(inputs, bias):
 
 def generate_index_tunable(s, L):
     """
-    generate the index lists for eunn to prepare weight matrices 
+    generate the index lists for goru to prepare orthogonal matrices 
     and perform efficient rotations
     This function works for tunable case
     """    
@@ -65,7 +65,7 @@ def generate_index_tunable(s, L):
 
 def generate_index_fft(s):
     """
-    generate the index lists for eunn to prepare weight matrices 
+    generate the index lists for goru to prepare orthogonal matrices 
     and perform efficient rotations
     This function works for fft case
     """      
@@ -162,11 +162,11 @@ def tunable_param(num_units, capacity):
 
 
 class GORUCell(rnn_cell_impl.RNNCell):
-    """Efficient Unitary Network Cell
+    """Gated Orthogonal Recurrent Unit Cell
     
     The implementation is based on: 
 
-    http://arxiv.org/abs/1612.05231.
+    http://arxiv.org/abs/1705.02761.
 
     """
 
@@ -176,10 +176,10 @@ class GORUCell(rnn_cell_impl.RNNCell):
                 fft=True, 
                 activation=modrelu,
                 reuse=None):
-        """Initializes the EUNN  cell.
+        """Initializes the GORU cell.
         Args:
-          num_units: int, The number of units in the LSTM cell.
-          capacity: int, The capacity of the unitary matrix for tunable
+          num_units: int, The number of units in the GORU cell.
+          capacity: int, The capacity of the orthogonal matrix for tunable
             case.
           fft: bool, default false, whether to use fft style 
           architecture or tunable style.
