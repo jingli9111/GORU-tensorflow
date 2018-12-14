@@ -1,2 +1,5 @@
 *.pyc
-*.json
+__pycache__
+tests
+*.plot
+*Orig*

@@ -12,7 +12,7 @@ tf.app.flags.DEFINE_string(
     'model', 'goru', 'The name of the RNN model: goru, lstm')
 
 tf.app.flags.DEFINE_integer(
-    'T', 200, 'Delay step of copying task')
+    'T', 200, 'Delay step of denoise task')
 
 tf.app.flags.DEFINE_integer(
     'iter', 10000, 'training iteration')
@@ -34,15 +34,21 @@ tf.app.flags.DEFINE_boolean(
 FLAGS = tf.app.flags.FLAGS
 
 
-def copying_data(T, n_data, n_sequence):
-    seq = np.random.randint(1, high=9, size=(n_data, n_sequence))
-    zeros1 = np.zeros((n_data, T - 1))
-    zeros2 = np.zeros((n_data, T))
-    marker = 9 * np.ones((n_data, 1))
+def denoise_data(T, n_data, n_sequence):
+    seq = np.random.randint(1, high=10, size=(n_data, n_sequence))
+    zeros1 = np.zeros((n_data, T + n_sequence - 1))
+
+    for i in range(n_data):
+        ind = np.random.choice(T + n_sequence - 1, n_sequence)
+        ind.sort()
+        zeros1[i][ind] = seq[i]
+
+    zeros2 = np.zeros((n_data, T + n_sequence))
+    marker = 10 * np.ones((n_data, 1))
     zeros3 = np.zeros((n_data, n_sequence))
 
-    x = np.concatenate((seq, zeros1, marker, zeros3), axis=1).astype('int32')
-    y = np.concatenate((zeros3, zeros2, seq), axis=1).astype('int64')
+    x = np.concatenate((zeros1, marker, zeros3), axis=1).astype('int32')
+    y = np.concatenate((zeros2, seq), axis=1).astype('int64')
 
     return x, y
 
@@ -50,15 +56,15 @@ def copying_data(T, n_data, n_sequence):
 def main(_):
 
     # --- Set data params ----------------
-    n_input = 10
-    n_output = 9
+    n_input = 11
+    n_output = 10
     n_sequence = 10
     n_train = FLAGS.iter * FLAGS.batch_size
     n_test = FLAGS.batch_size
 
     n_input = 10
     n_steps = FLAGS.T + 20
-    n_classes = 9
+    n_classes = 10
 
     # --- Create graph and compute gradients ----------------------
     x = tf.placeholder("int32", [None, n_steps])
@@ -101,7 +107,7 @@ def main(_):
     init = tf.global_variables_initializer()
 
     # --- baseline ----------------------
-    baseline = np.log(8) * 10 / (FLAGS.T + 20)
+    baseline = np.log(9) * 10 / (FLAGS.T + 20)
     print("Baseline is " + str(baseline))
 
     # --- Training Loop ----------------------
@@ -114,8 +120,8 @@ def main(_):
 
         # --- Create data --------------------
 
-        train_x, train_y = copying_data(FLAGS.T, n_train, n_sequence)
-        test_x, test_y = copying_data(FLAGS.T, n_test, n_sequence)
+        train_x, train_y = denoise_data(FLAGS.T, n_train, n_sequence)
+        test_x, test_y = denoise_data(FLAGS.T, n_test, n_sequence)
 
         sess.run(init)
 

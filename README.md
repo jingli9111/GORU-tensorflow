@@ -26,9 +26,13 @@ Args:
 
 
 ## Example tasks for GORU
-Code for copying task is here as example. The other experiment code will appear soon!
+We put two examples toy tasks: copying task and denoise task 
 
 #### Copying Memory Task
 ```
 python copying_task.py --model GORU
+```
+#### Denoise Task
+```
+python denoise_task.py --model GORU
 ```
